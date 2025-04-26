@@ -22,11 +22,11 @@ DATABASE_API_URL = os.environ.get(
     'http://itachi321.pythonanywhere.com' # !!! এটি আপনার ব্যক্তিগত URL, ব্যবহারকারীকে দেখানো হবে না !!!
 )
 
-# --- Helper Functions ---
+# --- Helper Functions (fetch_from_github, update_database, sync_data_task, get_channels_from_db অপরিবর্তিত) ---
 
 def fetch_from_github():
     """GitHub থেকে JSON ডেটা fetch করে।"""
-    logger.info(f"Attempting to fetch data from GitHub source.") # URL লগ করা হচ্ছে না
+    logger.info(f"Attempting to fetch data from GitHub source.")
     try:
         response = requests.get(GITHUB_JSON_URL, timeout=20)
         response.raise_for_status()
@@ -40,14 +40,12 @@ def fetch_from_github():
                  return None
         except json.JSONDecodeError as json_err:
             logger.error(f"Failed to decode JSON from GitHub URL. Error: {json_err}")
-            # debug লগে রেসপন্স রাখা যেতে পারে যদি প্রয়োজন হয়
-            # logger.debug(f"Response text (first 500 chars): {response.text[:500]}")
             return None
     except requests.exceptions.Timeout:
         logger.error(f"Timeout error while fetching data from GitHub.")
         return None
     except requests.exceptions.RequestException as e:
-        logger.error(f"Error fetching data from GitHub source: {e}") # URL লগ করা হচ্ছে না
+        logger.error(f"Error fetching data from GitHub source: {e}")
         return None
     except Exception as e:
         logger.error(f"An unexpected error occurred during GitHub fetch: {e}")
@@ -60,7 +58,7 @@ def update_database(channel_data):
         return False
 
     update_endpoint = f"{DATABASE_API_URL}/api/toffee/update"
-    logger.info(f"Attempting to send data to database API endpoint '/api/toffee/update'.") # শুধু পাথ লগ করা হচ্ছে
+    logger.info(f"Attempting to send data to database API endpoint '/api/toffee/update'.")
     try:
         headers = {'Content-Type': 'application/json'}
         response = requests.post(update_endpoint, json=channel_data, headers=headers, timeout=45)
@@ -82,11 +80,9 @@ def update_database(channel_data):
                  logger.warning(f"Database update response was not JSON and status was not OK. Status: {response.status_code}, Text: {response.text[:200]}")
                  return False
     except requests.exceptions.Timeout:
-        # এরর লগে সম্পূর্ণ URL রাখা যেতে পারে ডিবাগিং এর জন্য
         logger.error(f"Timeout error while sending data to database API: {update_endpoint}")
         return False
     except requests.exceptions.RequestException as e:
-        # এরর লগে সম্পূর্ণ URL রাখা যেতে পারে ডিবাগিং এর জন্য
         logger.error(f"Error sending data to database API {update_endpoint}: {e}")
         if e.response is not None:
             logger.error(f"Database API Response Status: {e.response.status_code}")
@@ -113,7 +109,7 @@ def sync_data_task(task_name="Scheduled"):
 def get_channels_from_db():
     """PythonAnywhere ডাটাবেস সার্ভার থেকে চ্যানেলের তালিকা আনে (JSON list হিসেবে)।"""
     get_endpoint = f"{DATABASE_API_URL}/api/toffee/channels"
-    logger.info(f"Attempting to fetch channels from database API endpoint '/api/toffee/channels'.") # শুধু পাথ লগ করা হচ্ছে
+    logger.info(f"Attempting to fetch channels from database API endpoint '/api/toffee/channels'.")
     try:
         response = requests.get(get_endpoint, timeout=25)
         response.raise_for_status()
@@ -125,11 +121,9 @@ def get_channels_from_db():
              logger.error(f"Received unexpected data format (not a list) from database API. Type: {type(channels)}")
              return None
     except requests.exceptions.Timeout:
-         # এরর লগে সম্পূর্ণ URL রাখা যেতে পারে ডিবাগিং এর জন্য
          logger.error(f"Timeout error while fetching channels from database API: {get_endpoint}")
          return None
     except requests.exceptions.RequestException as e:
-        # এরর লগে সম্পূর্ণ URL রাখা যেতে পারে ডিবাগিং এর জন্য
         logger.error(f"Error fetching channels from database API {get_endpoint}: {e}")
         if e.response is not None:
              logger.error(f"DB API Response Status: {e.response.status_code}")
@@ -137,7 +131,6 @@ def get_channels_from_db():
         return None
     except json.JSONDecodeError as json_err:
         logger.error(f"Failed to decode JSON response from database API. Error: {json_err}")
-        # logger.debug(f"Response text (first 500 chars): {response.text[:500]}") # প্রয়োজন হলে আনকমেন্ট করুন
         return None
     except Exception as e:
         logger.error(f"An unexpected error occurred fetching channels from DB: {e}")
@@ -162,53 +155,33 @@ except Exception as e:
 # --- Flask Routes ---
 
 # --- রুট '/' মুছে ফেলা হয়েছে ---
-# @app.route('/')
-# def index():
-#     ... (এই অংশটি বাদ দেওয়া হয়েছে) ...
 
 @app.route('/health')
 def health_check():
     """Health check endpoint for Render."""
-    # Render এর জন্য এই রুটটি রাখা ভালো
     return "OK", 200
 
-# --- পরিবর্তিত /toffee.m3u রুট (JSON + Credit) ---
+# --- /toffee.m3u রুট (Plain JSON Array আউটপুট) ---
 @app.route('/toffee.m3u') # ব্যবহারকারীর অনুরোধ অনুযায়ী এই নামটি রাখা হলো
 def serve_toffee_data_as_json():
     """
-    ডাটাবেস থেকে Toffee চ্যানেল ডেটা এনে JSON হিসেবে সার্ভ করে, সাথে ক্রেডিট মেসেজ যুক্ত করে।
+    ডাটাবেস থেকে Toffee চ্যানেল ডেটা এনে সরাসরি JSON অ্যারে হিসেবে সার্ভ করে।
     """
-    logger.info("Request received for /toffee.m3u (serving JSON data with credit)")
-    channels = get_channels_from_db() # ডাটাবেস থেকে চ্যানেলের তালিকা পান
+    logger.info("Request received for /toffee.m3u (serving plain JSON array)")
+    channels = get_channels_from_db() # ডাটাবেস থেকে চ্যানেলের তালিকা পান (list of dicts)
 
     if channels is None:
         # ডেটা আনতে ব্যর্থ হলে JSON ত্রুটি বার্তা দিন
         logger.error("Failed to get channels from DB for JSON response.")
         return jsonify({"error": "Failed to retrieve channel list from the database server."}), 503
 
-    # ক্রেডিট মেসেজ তৈরি করুন (বাংলায়)
-    credit_message = "এই তালিকাটি শাহরিয়ার মাহফুজ তৈরি করেছেন, শুধুমাত্র আপনাদের উপভোগের জন্য।"
-
-    # চূড়ান্ত JSON রেসপন্স তৈরি করুন (অবজেক্ট হিসেবে)
-    response_data = {
-        "credit": credit_message,
-        "channels": channels # ডাটাবেস থেকে পাওয়া চ্যানেল লিস্ট
-    }
-
-    logger.info(f"Returning {len(channels)} channels as JSON with credit.")
+    # সরাসরি প্রাপ্ত list of dictionaries (channels) কে JSON হিসেবে রিটার্ন করুন
+    logger.info(f"Returning {len(channels)} channels as plain JSON array.")
     # jsonify() স্বয়ংক্রিয়ভাবে Content-Type: application/json সেট করে দেয়
-    return jsonify(response_data), 200
+    return jsonify(channels), 200 # Return the list directly
 
 # --- Run Locally (for testing) ---
 if __name__ == '__main__':
     logger.info("Starting JSON Data Server locally for testing...")
-    # Check if environment variables are set (optional for local)
-    # if not os.environ.get('GITHUB_JSON_URL'):
-    #     logger.warning("Environment variable 'GITHUB_JSON_URL' is not set. Using default.")
-    # if not os.environ.get('DATABASE_API_URL'):
-    #     logger.warning("Environment variable 'DATABASE_API_URL' is not set. Using default.")
-
     # debug=False রাখুন কারণ Render এটি প্রোডাকশনে চালাবে
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)), debug=False)
-
-                                
